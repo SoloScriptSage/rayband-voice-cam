@@ -4,11 +4,18 @@ import time
 import wave
 import shutil
 import subprocess
+import logging
 from typing import Callable, Dict
 import sounddevice as sd
 import json
 from face_detect import detect_faces, draw_faces
 from audio import get_last_text
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 def _ensure_captures_dir(directory: str) -> None:
     if not os.path.exists(directory):
@@ -97,7 +104,7 @@ class AudioRecorder:
     def _callback(self, indata, frames, time_info, status):
         if status:
             # Non-fatal; just log
-            print(f"AudioRecorder status: {status}")
+            logger.info(f"AudioRecorder status: {status}")
         if self.wave_file is not None:
             # indata is int16 because we request dtype='int16'
             self.wave_file.writeframes(indata.tobytes())
@@ -123,10 +130,10 @@ class AudioRecorder:
             )
             self.stream.start()
             self.is_active = True
-            print(f"🎙️  Mic recording started → {wav_path}")
+            logger.info(f"🎙️  Mic recording started → {wav_path}")
             return True
         except Exception as e:
-            print(f"❌ Failed to start mic recording: {e}")
+            logger.error(f"❌ Failed to start mic recording: {e}", exc_info=True)
             # Cleanup partial state
             try:
                 if self.stream is not None:
@@ -161,7 +168,7 @@ class AudioRecorder:
         finally:
             self.wave_file = None
             self.is_active = False
-        print("🎙️  Mic recording stopped")
+        logger.info("🎙️  Mic recording stopped")
         return wav_path
 
 
@@ -169,7 +176,7 @@ def _try_mux_audio(video_path: str, audio_wav_path: str) -> str:
     # Check ffmpeg availability
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
-        print("ℹ️  ffmpeg not found in PATH; leaving WAV alongside video.")
+        logger.info("ℹ️  ffmpeg not found in PATH; leaving WAV alongside video.")
         return ""
     # Create output with same name replacing extension
     base, _ = os.path.splitext(video_path)
@@ -187,12 +194,12 @@ def _try_mux_audio(video_path: str, audio_wav_path: str) -> str:
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            print("❌ ffmpeg mux failed:\n" + result.stderr)
+            logger.error(f"❌ ffmpeg mux failed:\n {result.stderr}", exc_info=True)
             return ""
-        print(f"✅ Muxed audio+video → {output_path}")
+        logger.info(f"✅ Muxed audio+video → {output_path}")
         return output_path
     except Exception as e:
-        print(f"❌ Error running ffmpeg: {e}")
+        logger.error(f"❌ Error running ffmpeg: {e}", exc_info=True)
         return ""
 
 
@@ -249,57 +256,214 @@ def _save_cached_camera(index: int, backend: int) -> None:
         pass
 
 
+def _clear_cached_camera() -> None:
+    try:
+        if os.path.exists(_CAMERA_CACHE_PATH):
+            os.remove(_CAMERA_CACHE_PATH)
+    except Exception:
+        pass
+
+
+def _env_force_backend() -> int:
+    """Return an OpenCV backend flag from env var RAYCAM_BACKEND if set."""
+    value = os.environ.get("RAYCAM_BACKEND", "").strip().upper()
+    if not value:
+        return -1
+    # Accept names or integer codes
+    name_to_flag = {
+        "MSMF": getattr(cv2, "CAP_MSMF", -1),
+        "DSHOW": getattr(cv2, "CAP_DSHOW", -1),
+        "ANY": getattr(cv2, "CAP_ANY", -1),
+    }
+    if value in name_to_flag and name_to_flag[value] != -1:
+        return name_to_flag[value]
+    try:
+        return int(value)
+    except Exception:
+        return -1
+
+
+def _env_force_index() -> int:
+    """Return a forced camera index from env var RAYCAM_INDEX if set."""
+    value = os.environ.get("RAYCAM_INDEX", "").strip()
+    if value == "":
+        return -1
+    try:
+        return int(value)
+    except Exception:
+        return -1
+
+
+def _env_force_dshow_name() -> str:
+    value = os.environ.get("RAYCAM_DSHOW_NAME", "").strip()
+    return value
+
+
+def _enumerate_dshow_devices() -> list:
+    """Return a list of DirectShow video device names via ffmpeg if available."""
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        return []
+    try:
+        # ffmpeg prints device list to stderr
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        stderr = result.stderr
+        names = []
+        in_video_section = False
+        for line in stderr.splitlines():
+            line = line.strip()
+            if "DirectShow video devices" in line:
+                in_video_section = True
+                continue
+            if "DirectShow audio devices" in line:
+                in_video_section = False
+            if in_video_section:
+                # Typical line: "  \"Integrated Camera\""
+                if line.startswith("\"") and line.endswith("\""):
+                    try:
+                        names.append(line.strip('"'))
+                    except Exception:
+                        pass
+                # Or: "  "HD Pro Webcam C920" (Alternative name: ...)"
+                elif line.startswith('"'):
+                    try:
+                        # take the first quoted segment
+                        first = line.split('"')[1]
+                        if first:
+                            names.append(first)
+                    except Exception:
+                        pass
+        return list(dict.fromkeys(names))
+    except Exception:
+        return []
+
+
 def start_camera():
     def _try_open_camera() -> tuple:
         # Try multiple backends and indices to find a working camera
         backend_options = [
-            (cv2.CAP_DSHOW, "DSHOW"),
             (cv2.CAP_MSMF, "MSMF"),
+            (cv2.CAP_DSHOW, "DSHOW"),
             (cv2.CAP_ANY, "ANY"),
         ]
-        indices = [0, 1]
+        indices = list(range(0, 3))
+
+        forced_backend = _env_force_backend()
+        forced_index = _env_force_index()
+        forced_name = _env_force_dshow_name()
+        if forced_backend != -1:
+            # Place forced backend first
+            readable = "FORCED"
+            backend_options = [(forced_backend, readable)] + [
+                (b, n) for (b, n) in backend_options if b != forced_backend
+            ]
+        if forced_index != -1:
+            indices = [forced_index] + [i for i in indices if i != forced_index]
+
+        # Try forced DSHOW name first if provided
+        if forced_name:
+            for backend_try in [cv2.CAP_DSHOW, cv2.CAP_ANY]:
+                logger.info(f"… Trying DSHOW by name backend={backend_try}, name=video={forced_name}")
+                cap = cv2.VideoCapture(f"video={forced_name}", backend_try)
+                if cap.isOpened():
+                    ok = False
+                    for attempt in range(2):
+                        ok, test_frame = cap.read()
+                        if ok:
+                            break
+                        time.sleep(0.1)
+                    if ok:
+                        logger.info(f"✅ Camera opened by name using backend={backend_try}")
+                        try:
+                            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                        except Exception:
+                            pass
+                        # Do not cache name-based opens; cache resolves to index/backend only
+                        return cap, "DSHOW-NAME", -1
+                    cap.release()
 
         # Try cached camera first
         cached_index, cached_backend = _load_cached_camera()
-        if cached_index >= 0 and cached_backend >= 0:
-            print(f"… Trying cached camera backend={cached_backend}, index={cached_index}")
+        if cached_index >= 0 and cached_backend >= 0 and forced_index == -1 and forced_backend == -1:
+            logger.info(f"… Trying cached camera backend={cached_backend}, index={cached_index}")
             cap = cv2.VideoCapture(cached_index, cached_backend)
             if cap.isOpened():
                 try:
                     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                 except Exception:
                     pass
-                ok, test_frame = cap.read()
+                ok = False
+                # Retry a few times in case device is momentarily busy
+                for attempt in range(2):
+                    ok, test_frame = cap.read()
+                    if ok:
+                        break
+                    time.sleep(0.1)
                 if ok:
-                    print(f"✅ Using cached camera backend={cached_backend}, index={cached_index}")
+                    logger.info(f"✅ Using cached camera backend={cached_backend}, index={cached_index}")
                     return cap, str(cached_backend), cached_index
+                # Cached entry invalid; clear and continue to probe
                 cap.release()
+                _clear_cached_camera()
         for backend, name in backend_options:
             for idx in indices:
-                print(f"… Trying camera backend={name}, index={idx}")
+                logger.info(f"… Trying camera backend={name}, index={idx}")
                 cap = cv2.VideoCapture(idx, backend)
                 if cap.isOpened():
                     # Validate we can read a frame
-                    ok, test_frame = cap.read()
+                    ok = False
+                    for attempt in range(2):
+                        ok, test_frame = cap.read()
+                        if ok:
+                            break
+                        time.sleep(0.1)
                     if ok:
-                        print(f"✅ Camera opened using backend={name}, index={idx}")
+                        logger.info(f"Camera opened using backend={name}, index={idx}")
                         try:
                             cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
                         except Exception:
                             pass
                         _save_cached_camera(idx, backend)
                         return cap, name, idx
+                    logger.info(f"   ↳ Opened but read failed on backend={name}, index={idx}; retrying others…")
                     cap.release()
+
+        # As a last resort, try DSHOW by enumerated names
+        dshow_names = _enumerate_dshow_devices()
+        for dev_name in dshow_names:
+            logger.info(f"… Trying DSHOW by enumerated name: video={dev_name}")
+            cap = cv2.VideoCapture(f"video={dev_name}", cv2.CAP_DSHOW)
+            if cap.isOpened():
+                ok = False
+                for attempt in range(2):
+                    ok, test_frame = cap.read()
+                    if ok:
+                        break
+                    time.sleep(0.1)
+                if ok:
+                    logger.info(f"Camera opened by name (DSHOW): {dev_name}")
+                    try:
+                        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+                    except Exception:
+                        pass
+                    return cap, "DSHOW-NAME", -1
+                cap.release()
         return None, None, None
 
     cap, backend_name, cam_index = _try_open_camera()
     if cap is None:
-        print("❌ Cannot access camera: tried MSMF/DSHOW/ANY on indices 0-3")
-        print("   Tips: close other apps using the camera, check Windows Privacy settings,"
+        tried_range = "0-9" if _env_force_index() == -1 else str(_env_force_index())
+        logger.error(f"❌ Cannot access camera: tried MSMF/DSHOW/ANY on indices {tried_range}", exc_info=True)
+        logger.info("   Tips: close other apps using the camera, check Windows Privacy settings,"
               " try a different USB port, or update drivers.")
         return
 
-    print("✅ Camera started. Press 'q' to quit.")
+    logger.info("✅ Camera started. Press 'q' to quit.")
 
     captures_dir = os.path.join(os.path.dirname(__file__), "captures")
     _ensure_captures_dir(captures_dir)
@@ -330,9 +494,23 @@ def start_camera():
     except Exception:
         pass
 
+    recovery_attempted = False
     while True:
         ret, frame = cap.read()
         if not ret:
+            # If the stream fails mid-run (e.g., other app grabbed device), try to recover once
+            if not recovery_attempted:
+                logger.error("⚠️  Camera read failed; attempting to recover with different backend/index…", exc_info=True)
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+                _clear_cached_camera()
+                new_cap, backend_name, cam_index = _try_open_camera()
+                if new_cap is not None:
+                    cap = new_cap
+                    recovery_attempted = True
+                    continue
             break
 
         # Detect and draw faces
@@ -407,7 +585,7 @@ def start_camera():
                 last_snapshot_time = now
                 last_handled_text = current_text
                 router.mark_ran("take_picture")
-                print(f"📸 Saved snapshot: {saved_path}")
+                logger.info(f"📸 Saved snapshot: {saved_path}")
 
             # Start recording
             elif _should_start_recording(current_text) and not is_recording and router.should_run("start_recording"):
@@ -425,7 +603,7 @@ def start_camera():
                 fourcc = cv2.VideoWriter_fourcc(*"mp4v")
                 video_writer = cv2.VideoWriter(video_path, fourcc, fps, (width, height))
                 if not video_writer.isOpened():
-                    print("❌ Failed to start video writer")
+                    logger.error("❌ Failed to start video writer", exc_info=True)
                 else:
                     # Start mic recorder
                     try:
@@ -436,12 +614,12 @@ def start_camera():
                     try:
                         audio_recorder.start(audio_wav_path)
                     except Exception as _:
-                        print("⚠️  Failed to start mic; continuing video-only recording")
+                        logger.error("⚠️  Failed to start mic; continuing video-only recording", exc_info=True)
 
                     is_recording = True
                     last_handled_text = current_text
                     router.mark_ran("start_recording")
-                    print(f"⏺️ Recording started: {video_path}")
+                    logger.info(f"⏺️ Recording started: {video_path}")
 
             # Stop recording
             elif _should_stop_recording(current_text) and is_recording and router.should_run("stop_recording"):
@@ -463,11 +641,11 @@ def start_camera():
                 router.mark_ran("stop_recording")
                 if video_path:
                     if muxed_path:
-                        print(f"⏹️ Recording saved (with audio): {muxed_path}")
+                        logger.info(f"⏹️ Recording saved (with audio): {muxed_path}")
                     else:
-                        print(f"⏹️ Recording saved: {video_path}")
+                        logger.info(f"⏹️ Recording saved: {video_path}")
                         if audio_wav_path and os.path.exists(audio_wav_path):
-                            print(f"🎵 Audio WAV saved: {audio_wav_path}")
+                            logger.info(f"🎵 Audio WAV saved: {audio_wav_path}")
 
         cv2.imshow("RayBan Prototype", frame)
         
@@ -482,4 +660,4 @@ def start_camera():
     except Exception:
         pass
     cv2.destroyAllWindows()
-    print("✅ Camera stopped.")
+    logger.info("✅ Camera stopped.")
