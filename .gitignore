@@ -1,25 +1,103 @@
-@'
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
 .venv/
+venv/
+ENV/
+env/
 .env
+.venv
 
-# Data/outputs
-captures/
-videos/
-
-# Models and heavy artifacts
-model/
-known_faces/
-
-# OS/IDE
-.DS_Store
-Thumbs.db
+# IDE/Editor files
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
 
-# CMake build artifacts
-cmake-4.1.1/Source/**/CMakeFiles/
-cmake-4.1.1/Source/**/CMakeCache.txt
-'@ | Out-File -Encoding utf8 .gitignore
+# Project-specific data/outputs
+captures/
+videos/
+known_faces/
+
+# Heavy ML models and artifacts
+model/
+*.pkl
+*.joblib
+*.h5
+*.pb
+
+# Audio/Video files (use Git LFS for important ones)
+*.wav
+*.mp3
+*.mp4
+*.avi
+*.mov
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.cache
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# CMake and build artifacts (REMOVE ENTIRE CMAKE DIRECTORY)
+cmake-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# KiCad temporary files
+*.kicad_*
+!*.kicad_pro
+!*.kicad_sch
+!*.kicad_pcb
+fp-info-cache
+
+# Test files
+test.jpg
+*_test.py
+test_*.py
+
+# Backup files
+*.bak
+*.backup
+*_backup_*
+*.old
+
+# Documentation build
+docs/_build/
+docs/build/
