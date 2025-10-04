@@ -89,8 +89,11 @@ fp-info-cache
 
 # Test files
 test.jpg
-*_test.py
-test_*.py
+
+# Package build artifacts
+build/
+dist/
+*.egg-info/
 
 # Backup files
 *.bak
