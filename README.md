@@ -23,35 +23,67 @@ Requirements
 
 Installation
 ------------
-1. Create/activate a virtual environment (recommended)
-   
-   ```powershell
-   python -m venv .venv
-   . .\.venv\Scripts\Activate.ps1
-   ```
 
-2. Install dependencies
-   
-   ```powershell
-   pip install opencv-python sounddevice scipy numpy vosk dlib
-   # Optional (for hand detection)
-   pip install mediapipe
-   # Optional (for name recognition)
-   pip install face_recognition
-   # If prompted for models for face_recognition:
-   pip install git+https://github.com/ageitgey/face_recognition_models
-   ```
+### Quick Start
+```powershell
+# 1. Clone the repository
+git clone https://github.com/SoloScriptSage/rayband-voice-cam.git
+cd rayband-voice-cam
 
-3. Download a Vosk model and set the path in `main.py`:
-   - Place model into `model/` and update `MODEL_PATH` if needed (default: `D:/Projects/rayband-facebook/model`).
+# 2. Create virtual environment
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# 3. Install dependencies
+pip install -e .
+
+# 4. Download speech recognition model
+python scripts/setup_model.py
+
+# 5. Test hardware
+python scripts/test_hardware.py
+
+# 6. Run the application
+python -m rayband.cli.main
+```
+
+### Manual Installation
+```powershell
+# Install dependencies manually
+pip install opencv-python sounddevice scipy numpy vosk dlib
+pip install mediapipe face_recognition  # Optional features
+
+# Download Vosk model manually
+# Visit: https://alphacephei.com/vosk/models
+# Extract to model/ directory
+```
 
 Running
 -------
+
+### New Package Structure (Recommended)
 ```powershell
-py .\main.py
+# Run with new structure
+python -m rayband.cli.main
+
+# Or use the console script (after pip install -e .)
+rayband
 ```
-- The microphone recognition starts in a background thread.
-- The camera window opens; press `q` to quit.
+
+### Legacy Mode (Backward Compatible)
+```powershell
+# Run with legacy structure
+python main.py
+```
+
+### Hardware Testing
+```powershell
+# Test all hardware components
+python scripts/test_hardware.py
+
+# Or use the console script
+rayband-test
+```
 
 Voice Commands
 --------------
@@ -114,10 +146,59 @@ Troubleshooting
 - Name recognition warnings:
   - Shown only when recognition is used. Install `face_recognition` and `face_recognition_models` if you want labels.
 
+Project Structure
+-----------------
+```
+rayband-voice-cam/
+├── rayband/                    # Main package
+│   ├── core/                   # Core functionality
+│   │   ├── audio.py           # Audio processing & speech recognition
+│   │   ├── camera.py          # Camera handling & video processing
+│   │   ├── face_detection.py  # Face detection & recognition
+│   │   └── finger_detection.py # Hand/finger tracking
+│   ├── utils/                  # Utilities
+│   │   ├── config.py          # Configuration management
+│   │   ├── command_router.py  # Voice command handling
+│   │   └── file_utils.py      # File operations
+│   ├── hardware/              # Hardware components
+│   │   └── components/        # KiCad components
+│   └── cli/                   # Command line interface
+│       └── main.py
+├── tests/                     # Test files
+├── docs/                      # Documentation
+├── schematics/                # Hardware schematics
+├── scripts/                   # Utility scripts
+│   ├── setup_model.py        # Model download script
+│   └── test_hardware.py      # Hardware testing
+├── requirements.txt
+├── setup.py                   # Package installation
+├── pyproject.toml            # Modern Python packaging
+└── README.md
+```
+
+Development
+-----------
+```powershell
+# Install in development mode
+pip install -e .[dev]
+
+# Run tests
+python -m pytest
+
+# Run linting
+black rayband/
+flake8 rayband/
+mypy rayband/
+
+# Build package
+python -m build
+```
+
 Git & Repo
 ----------
-- Suggested repo name: `rayband-voice-cam`
-- `.gitignore` already excludes large folders like `captures/`, `videos/`, and `model/`.
+- Repository: `rayband-voice-cam`
+- `.gitignore` excludes large folders like `captures/`, `videos/`, and `model/`.
+- Git LFS handles large schematic files.
 
 License
 -------
