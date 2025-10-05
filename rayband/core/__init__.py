@@ -8,16 +8,4 @@ This module contains the main processing components:
 - Hand/finger tracking
 """
 
-from .audio import AudioProcessor, SpeechRecognizer
-from .camera import CameraController
-from .face_detection import FaceDetector, FaceRecognizer
-from .finger_detection import FingerDetector
-
-__all__ = [
-    "AudioProcessor", 
-    "SpeechRecognizer",
-    "CameraController", 
-    "FaceDetector", 
-    "FaceRecognizer",
-    "FingerDetector"
-]
+__all__ = []
