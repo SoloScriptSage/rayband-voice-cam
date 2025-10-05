@@ -1,5 +1,0 @@
-(sym_lib_table
-  (version 7)
-  (lib (name "New_Library")(type "KiCad")(uri "D:/Projects/rayband-facebook/rayband/hardware/components/MP2636/New_Library.kicad_sym")(options "")(descr ""))
-  (lib (name "MP2636")(type "KiCad")(uri "D:/Projects/rayband-facebook/rayband/hardware/components/MP2636/MP2636.kicad_sym")(options "")(descr ""))
-)
