@@ -9,8 +9,8 @@ A voice-controlled camera system for smart glasses featuring:
 """
 
 __version__ = "1.0.0"
-__author__ = "RayBand Team"
-__email__ = "team@rayband.dev"
+__author__ = "Vladyslav Hirchuk"
+__email__ = "hirchukv@gmail.com"
 
 # Core modules
 from . import core

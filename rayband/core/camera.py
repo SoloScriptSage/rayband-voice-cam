@@ -148,6 +148,11 @@ class CameraController:
         
         # Cache file
         self._cache_path = ".camera_cache.json"
+
+        # Timing variables for FPS
+        self._last_fps_time = time.time()
+        self._frame_count = 0
+        self._current_fps = 0
     
     def _load_cached_camera(self) -> Tuple[int, int]:
         """Load cached camera settings."""
@@ -257,6 +262,42 @@ class CameraController:
         
         return lines
     
+    def _draw_status_bar(self, frame):
+        """Draw status bar at bottom with info."""
+        bar_height = 30
+        
+        # Draw dark bar
+        overlay = frame.copy()
+        cv2.rectangle(
+            overlay, 
+            (0, frame.shape[0] - bar_height), 
+            (frame.shape[1], frame.shape[0]), 
+            (40, 40, 40), 
+            -1)
+        
+        cv2.addWeighted(overlay, 0.8, frame, 0.2, 0, frame)
+        
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.5
+        thickness = 1
+        y = frame.shape[0] - 10
+        
+        # Left side: Status
+        status = "● LIVE" if not self.is_recording else "● REC"
+        color = (0, 255, 0) if not self.is_recording else (0, 0, 255)
+        cv2.putText(frame, status, (10, y), font, font_scale, color, thickness, cv2.LINE_AA)
+        
+        # Center: FPS or info
+        fps = int(self._current_fps)
+        info = f"FPS: {fps}"
+        (info_w, _), _ = cv2.getTextSize(info, font, font_scale, thickness)
+        cv2.putText(frame, info, (frame.shape[1]//2 - info_w//2, y), font, font_scale, (200, 200, 200), thickness, cv2.LINE_AA)
+        
+        # Right side: Quit instruction
+        quit_text = "Press Q to quit"
+        (quit_w, _), _ = cv2.getTextSize(quit_text, font, font_scale, thickness)
+        cv2.putText(frame, quit_text, (frame.shape[1] - quit_w - 10, y), font, font_scale, (200, 200, 200), thickness, cv2.LINE_AA)
+
     def _handle_commands(self, current_text: str, frame):
         """Handle voice commands."""
         if not current_text or current_text == self.last_handled_text:
@@ -363,6 +404,17 @@ class CameraController:
         recovery_attempted = False
         while True:
             ret, frame = self.cap.read()
+
+            # FPS Counter
+            self._frame_count += 1
+            if self._frame_count >= 10:  # update every ~10 frames
+                now = time.time()
+                elapsed = now - self._last_fps_time
+                if elapsed > 0:
+                    self._current_fps = self._frame_count / elapsed
+                self._frame_count = 0
+                self._last_fps_time = now
+
             if not ret:
                 if not recovery_attempted:
                     logger.error("⚠️  Camera read failed; attempting to recover...")
@@ -404,17 +456,20 @@ class CameraController:
                 
                 # Draw semi-transparent background
                 overlay = frame.copy()
+
+                status_bar_height = 30
+                
                 cv2.rectangle(
                     overlay,
-                    (0, frame.shape[0] - total_height),
-                    (frame.shape[1], frame.shape[0]),
+                    (0, frame.shape[0] - total_height - status_bar_height),
+                    (frame.shape[1], frame.shape[0] - status_bar_height),
                     (0, 0, 0),
                     -1,
                 )
                 cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
                 
                 # Draw text
-                base_y = frame.shape[0] - margin_bottom - (len(lines) - 1) * (line_h + 6)
+                base_y = frame.shape[0] - status_bar_height - margin_bottom - (len(lines) - 1) * (line_h + 6)
                 for i, line in enumerate(lines):
                     y = base_y + i * (line_h + 6)
                     cv2.putText(
@@ -434,6 +489,10 @@ class CameraController:
             if self.is_recording and self.video_writer:
                 self.video_writer.write(frame)
             
+
+            # Draw status bar
+            self._draw_status_bar(frame)
+
             # Display
             cv2.imshow("RayBand Voice Camera", frame)
             
