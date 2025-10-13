@@ -120,6 +120,7 @@ class CameraController:
             config.CAPTURES_DIR, 
             config.VIDEOS_DIR
         )
+
         self.command_router = CommandRouter()
         self.face_detector = FaceDetector()
         
@@ -127,7 +128,10 @@ class CameraController:
         self.command_router.set_cooldown("take_picture", config.PICTURE_COOLDOWN)
         self.command_router.set_cooldown("start_recording", config.RECORDING_COOLDOWN)
         self.command_router.set_cooldown("stop_recording", config.RECORDING_COOLDOWN)
-        
+        self.command_router.set_cooldown("switch_language", config.LANGUAGE_SWITCH_COOLDOWN)
+
+        self.current_language = config.current_language
+
         # Audio setup
         self.audio_processor = AudioProcessor()
         self.speech_recognizer = SpeechRecognizer(
@@ -282,16 +286,10 @@ class CameraController:
         thickness = 1
         y = frame.shape[0] - 10
         
-        # Left side: Status
-        status = "● LIVE" if not self.is_recording else "● REC"
-        color = (0, 255, 0) if not self.is_recording else (0, 0, 255)
-        cv2.putText(frame, status, (10, y), font, font_scale, color, thickness, cv2.LINE_AA)
-        
-        # Center: FPS or info
+        # Left side: FPS
         fps = int(self._current_fps)
-        info = f"FPS: {fps}"
-        (info_w, _), _ = cv2.getTextSize(info, font, font_scale, thickness)
-        cv2.putText(frame, info, (frame.shape[1]//2 - info_w//2, y), font, font_scale, (200, 200, 200), thickness, cv2.LINE_AA)
+        fps_text = f"FPS: {fps} | {self.current_language.upper()}"
+        cv2.putText(frame, fps_text, (10, y), font, font_scale, (200, 200, 200), thickness, cv2.LINE_AA)
         
         # Right side: Quit instruction
         quit_text = "Press Q to quit"
@@ -303,6 +301,18 @@ class CameraController:
         if not current_text or current_text == self.last_handled_text:
             return
         
+
+        # Check for language switch FIRST
+        new_language = self.command_router.detect_language_switch(current_text)
+        if new_language and self.command_router.should_run("switch_language"):
+            if self.config.switch_language(new_language):
+                self.speech_recognizer.reload_model(self.config.MODEL_PATH) # Reload model?
+                self.current_language = new_language
+                self.command_router.mark_ran("switch_language")
+                self.last_handled_text = current_text
+                logger.info(f"🌐 Switched to {new_language}")
+            return
+
         # Take picture
         if self.command_router.should_take_picture(current_text):
             if self.command_router.should_run("take_picture"):

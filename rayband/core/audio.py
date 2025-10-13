@@ -50,6 +50,16 @@ class SpeechRecognizer:
         self.recognizer: Optional[vosk.KaldiRecognizer] = None
         self.is_running = False
         self._thread: Optional[threading.Thread] = None
+        self._should_reload = False
+        self._reload_lock = threading.Lock()
+    
+    def reload_model(self, new_model_path: str) -> bool:
+        """Request model reload with new path."""
+        with self._reload_lock:
+            self.model_path = new_model_path
+            self._should_reload = True
+        logger.info(f"🔄 Language switch requested: {new_model_path}")
+        return True
     
     def start(self) -> bool:
         """Start speech recognition in background thread."""

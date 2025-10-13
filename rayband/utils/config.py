@@ -10,8 +10,15 @@ class Config:
     """Configuration settings for the RayBand voice camera."""
     
     def __init__(self):
-        # Paths
-        self.MODEL_PATH = os.getenv("VOSK_MODEL_PATH", "./model")
+        # Language models
+        self.MODELS = {
+            "english": "./models/vosk-model-en-us-0.22",
+            "ukrainian": "./models/vosk-model-uk-v3",
+        }
+
+        # Default language
+        self.current_language = "english"
+        self.MODEL_PATH = self.MODELS[self.current_language]
         
         # Audio settings
         self.AUDIO_DEVICE_ID = 1
@@ -26,11 +33,24 @@ class Config:
         # Command cooldowns (seconds)
         self.PICTURE_COOLDOWN = 2.0
         self.RECORDING_COOLDOWN = 2.0
+        self.LANGUAGE_SWITCH_COOLDOWN = 3.0
         
         # File paths
         self.CAPTURES_DIR = "captures"
         self.VIDEOS_DIR = "videos"
         self.KNOWN_FACES_DIR = "known_faces"
+    
+    def switch_language(self, language: str) -> bool:
+        """Switch to a different lanuage model."""
+        if language in self.MODELS:
+            self.current_language = language
+            self.MODEL_PATH = self.MODELS[language]
+            return True
+        return False
+    
+    def get_available_languages(self) -> list:
+        """Get list of available languages."""
+        return list(self.MODELS.keys())
     
     def get_model_path(self) -> str:
         """Get the path to the Vosk model directory."""
@@ -43,7 +63,6 @@ class Config:
     def get_camera_settings(self) -> tuple:
         """Get camera backend and index settings."""
         return self.CAMERA_BACKEND, self.CAMERA_INDEX
-
 
 # Global config instance
 config = Config()

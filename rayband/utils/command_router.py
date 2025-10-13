@@ -29,6 +29,11 @@ class CommandRouter:
             "stop recording", "end recording", "stop video", "finish recording"
         ]
 
+        self.language_triggers = {
+            "english" : ["switch english", "switch to english", "english mode"],
+            "ukrainian" : ["switch ukrainian", "switch to ukrainian", "ukrainian mode"]
+        }
+
     def set_cooldown(self, command_name: str, seconds: float) -> None:
         """Set cooldown period for a command."""
         self._cooldowns[command_name] = seconds
@@ -64,6 +69,18 @@ class CommandRouter:
         text = recognized_text.lower()
         return any(trigger in text for trigger in self._stop_recording_triggers)
     
+    def detect_language_switch(self, recognized_text: str) -> str:
+        """Detect if user switches the language. Returns language name or empty string."""
+        if not recognized_text:
+            return False
+        text = recognized_text.lower()
+
+        for language, triggers in self.language_triggers.items():
+            if any(trigger in text for trigger in triggers):
+                return language
+            
+        return ""
+
     def process_command(self, recognized_text: str) -> str:
         """Process recognized text and return command type."""
         if not recognized_text or recognized_text == self._last_command_text:
