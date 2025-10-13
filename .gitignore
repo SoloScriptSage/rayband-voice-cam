@@ -45,7 +45,7 @@ videos/
 known_faces/
 
 # Heavy ML models and artifacts
-model/
+models/
 *.pkl
 *.joblib
 *.h5
