@@ -17,6 +17,8 @@ from ..utils.command_router import CommandRouter
 from ..utils.file_utils import FileManager
 from .audio import AudioProcessor, SpeechRecognizer
 from .face_detection import FaceDetector
+from .finger_detection import FingerDetector
+from .sign_language import SignLanguageDetector
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +125,9 @@ class CameraController:
 
         self.command_router = CommandRouter()
         self.face_detector = FaceDetector()
-        
+        self.finger_detector = FingerDetector()
+        self.sign_detector = SignLanguageDetector()
+
         # Setup command cooldowns
         self.command_router.set_cooldown("take_picture", config.PICTURE_COOLDOWN)
         self.command_router.set_cooldown("start_recording", config.RECORDING_COOLDOWN)
@@ -334,6 +338,12 @@ class CameraController:
                 self._stop_recording()
                 self.command_router.mark_ran("stop_recording")
                 self.last_handled_text = current_text
+
+        # Start sign language mode
+        elif self.command_router.should_toggle_sign_mode(current_text):
+            self.sign_mode_enabled = not self.sign_mode_enabled
+            logger.info(f"Sign mode: {'ON' if self.sign_mode_enabled else 'OFF'}")
+            self.last_handled_text = current_text
     
     def _start_recording(self, frame):
         """Start video recording."""
@@ -445,6 +455,15 @@ class CameraController:
             faces = self.face_detector.detect_faces(frame)
             self.face_detector.draw_faces(frame, faces)
             
+            if self.finger_detector.is_available():
+                hand_results = self.finger_detector.detect_fingers(frame)
+                self.finger_detector.draw_fingers(frame, hand_results)
+
+                # Adding new feature sign language
+                sign, confidence = self.sign_detector.detect_sign(hand_results)
+                if sign and confidence > 0.7:
+                    self.sign_detector.draw_sign_info(frame, x=10, y=100)
+                
             # Get current text
             current_text = self.audio_processor.get_last_text()
             

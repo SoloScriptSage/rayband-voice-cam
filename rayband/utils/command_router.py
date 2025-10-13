@@ -16,23 +16,41 @@ class CommandRouter:
         
         # Default command triggers
         self._picture_triggers = [
-            "take a picture", "take picture", "take photo", "take a photo",
-            "snap a photo", "snap picture", "capture photo", "capture picture",
+            "take a picture", 
+            "take picture", 
+            "take photo", 
+            "take a photo",
+            "snap a photo", 
+            "snap picture", 
+            "capture photo", 
+            "capture picture",
             "screenshot"
         ]
         
         self._start_recording_triggers = [
-            "start recording", "start video", "begin recording", "record video"
+            "start recording", 
+            "start video", 
+            "begin recording", 
+            "record video"
         ]
         
         self._stop_recording_triggers = [
-            "stop recording", "end recording", "stop video", "finish recording"
+            "stop recording", 
+            "end recording", 
+            "stop video", 
+            "finish recording"
         ]
 
         self.language_triggers = {
             "english" : ["switch english", "switch to english", "english mode"],
             "ukrainian" : ["switch ukrainian", "switch to ukrainian", "ukrainian mode"]
         }
+
+        self.sign_mode_triggers = [
+            "sign mode",
+            "start signing",
+            "sign language mode"
+        ]
 
     def set_cooldown(self, command_name: str, seconds: float) -> None:
         """Set cooldown period for a command."""
@@ -68,6 +86,14 @@ class CommandRouter:
             return False
         text = recognized_text.lower()
         return any(trigger in text for trigger in self._stop_recording_triggers)
+    
+    def should_toggle_sign_mode(self, recognized_text : str) -> bool:
+        """Check if the text contains sign language starting commands."""
+        if not recognized_text:
+            return False
+        
+        text = recognized_text.lower()
+        return any(trigger in text for trigger in self.sign_mode_triggers)
     
     def detect_language_switch(self, recognized_text: str) -> str:
         """Detect if user switches the language. Returns language name or empty string."""

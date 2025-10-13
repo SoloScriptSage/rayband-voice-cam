@@ -1,31 +1,70 @@
 """
 Face detection and recognition for RayBand voice camera.
+Uses OpenCV Haar Cascade (no dlib required).
 """
 
 import cv2
-import dlib
 import os
 import logging
 from typing import List, Tuple, Optional
 
 logger = logging.getLogger(__name__)
 
-# Load dlib frontal face detector
-detector = dlib.get_frontal_face_detector()
+# Try to import dlib, but use OpenCV as fallback
+try:
+    import dlib
+    DLIB_AVAILABLE = True
+    detector = dlib.get_frontal_face_detector()
+    logger.info("✓ Using dlib for face detection")
+except ImportError:
+    DLIB_AVAILABLE = False
+    detector = None
+    logger.info("✓ Using OpenCV Haar Cascade for face detection (dlib not available)")
 
 
 class FaceDetector:
-    """Handles face detection using dlib."""
+    """Handles face detection using dlib or OpenCV."""
     
     def __init__(self):
-        self.detector = detector
+        if DLIB_AVAILABLE:
+            self.detector = detector
+            self.use_dlib = True
+        else:
+            # Use OpenCV's Haar Cascade
+            cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
+            self.detector = cv2.CascadeClassifier(cascade_path)
+            self.use_dlib = False
+            
+            if self.detector.empty():
+                logger.error("Failed to load Haar Cascade classifier")
+                self.detector = None
     
     def detect_faces(self, frame) -> List[Tuple[int, int, int, int]]:
         """Returns list of face rectangles (x, y, w, h)."""
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self.detector(gray)
-        faces_list = [(face.left(), face.top(), face.width(), face.height()) for face in faces]
-        return faces_list
+        if self.detector is None:
+            return []
+        
+        try:
+            if self.use_dlib:
+                # dlib detection
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = self.detector(gray)
+                faces_list = [(face.left(), face.top(), face.width(), face.height()) for face in faces]
+                return faces_list
+            else:
+                # OpenCV Haar Cascade detection
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                faces = self.detector.detectMultiScale(
+                    gray,
+                    scaleFactor=1.1,
+                    minNeighbors=5,
+                    minSize=(30, 30)
+                )
+                # Convert to (x, y, w, h) tuples
+                return [(int(x), int(y), int(w), int(h)) for (x, y, w, h) in faces]
+        except Exception as e:
+            logger.error(f"Error detecting faces: {e}")
+            return []
 
     def draw_faces(self, frame, faces: List[Tuple[int, int, int, int]]) -> None:
         """Draw rectangles around detected faces."""
