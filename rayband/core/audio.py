@@ -1,5 +1,6 @@
 """
 Audio processing and speech recognition for RayBand voice camera.
+Fixed to properly reload models on language switch.
 """
 
 import sounddevice as sd
@@ -52,6 +53,7 @@ class SpeechRecognizer:
         self._thread: Optional[threading.Thread] = None
         self._should_reload = False
         self._reload_lock = threading.Lock()
+        self._stream = None
     
     def reload_model(self, new_model_path: str) -> bool:
         """Request model reload with new path."""
@@ -67,6 +69,19 @@ class SpeechRecognizer:
         self._thread.start()
         return True
     
+    def _load_model(self):
+        """Load or reload the Vosk model."""
+        logger.info(f"📂 Loading Vosk model from {self.model_path}...")
+        try:
+            self.model = vosk.Model(self.model_path)
+            self.recognizer = vosk.KaldiRecognizer(self.model, config.VOSK_SAMPLERATE)
+            self.recognizer.SetWords(True)
+            logger.info("✓ Model loaded")
+            return True
+        except Exception as e:
+            logger.error(f"✗ Failed to load model: {e}", exc_info=True)
+            return False
+    
     def _recognition_loop(self):
         """Main recognition loop running in separate thread."""
         # Verify device
@@ -78,67 +93,87 @@ class SpeechRecognizer:
             logger.error(f"✗ Device error: {e}", exc_info=True)
             return
         
-        # Load Vosk model
-        logger.info(f"📂 Loading Vosk model...")
-        try:
-            self.model = vosk.Model(self.model_path)
-            logger.info("✓ Model loaded")
-        except Exception as e:
-            logger.error(f"✗ Failed to load model: {e}", exc_info=True)
+        # Load initial model
+        if not self._load_model():
             return
-        
-        self.recognizer = vosk.KaldiRecognizer(self.model, config.VOSK_SAMPLERATE)
-        self.recognizer.SetWords(True)
         
         resample_ratio = config.VOSK_SAMPLERATE / config.MIC_SAMPLERATE
         
         logger.info("🎙️  Starting audio recognition...")
         try:
-            with sd.InputStream(
+            self._stream = sd.InputStream(
                 samplerate=config.MIC_SAMPLERATE,
                 blocksize=config.BLOCKSIZE,
                 dtype='float32',
                 channels=1,
                 device=config.AUDIO_DEVICE_ID,
                 callback=self.audio_processor.audio_callback
-            ):
-                logger.info("✅ Audio recognition active! Speak now...")
-                with self.audio_processor._audio_lock:
-                    self.audio_processor.audio_state["is_listening"] = True
+            )
+            self._stream.start()
+            
+            logger.info("✅ Audio recognition active! Speak now...")
+            with self.audio_processor._audio_lock:
+                self.audio_processor.audio_state["is_listening"] = True
+            
+            self.is_running = True
+            
+            while self.is_running:
+                # Check if we need to reload the model
+                should_reload = False
+                with self._reload_lock:
+                    if self._should_reload:
+                        should_reload = True
+                        self._should_reload = False
                 
-                self.is_running = True
-                
-                while self.is_running:
-                    try:
-                        data = self.audio_processor.q.get(timeout=0.1)
-                    except queue.Empty:
-                        continue
+                if should_reload:
+                    logger.info("🔄 Reloading model...")
+                    # Clear the queue
+                    while not self.audio_processor.q.empty():
+                        try:
+                            self.audio_processor.q.get_nowait()
+                        except queue.Empty:
+                            break
                     
-                    # Resample audio
-                    audio_data = data[:, 0]
-                    num_output_samples = int(len(audio_data) * resample_ratio)
-                    resampled = signal.resample(audio_data, num_output_samples)
-                    
-                    # Scale to int16 range
-                    resampled_scaled = np.clip(resampled * 32767, -32768, 32767)
-                    resampled_int16 = np.int16(resampled_scaled)
-                    
-                    # Process with Vosk
-                    if self.recognizer.AcceptWaveform(resampled_int16.tobytes()):
-                        result = json.loads(self.recognizer.Result())
-                        text = result.get("text", "")
-                        if text:
-                            with self.audio_processor._audio_lock:
-                                self.audio_processor.audio_state["text"] = text
-                            logger.info(f"🗣️  Recognized: {text}")
+                    # Reload model
+                    if self._load_model():
+                        logger.info("✅ Model reloaded successfully!")
+                        with self.audio_processor._audio_lock:
+                            self.audio_processor.audio_state["text"] = "Model reloaded - speak now!"
                     else:
-                        # Partial results
-                        partial = json.loads(self.recognizer.PartialResult())
-                        partial_text = partial.get("partial", "")
-                        if partial_text:
-                            with self.audio_processor._audio_lock:
-                                self.audio_processor.audio_state["text"] = partial_text
-                                
+                        logger.error("❌ Failed to reload model")
+                        continue
+                
+                # Get audio data
+                try:
+                    data = self.audio_processor.q.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+                
+                # Resample audio
+                audio_data = data[:, 0]
+                num_output_samples = int(len(audio_data) * resample_ratio)
+                resampled = signal.resample(audio_data, num_output_samples)
+                
+                # Scale to int16 range
+                resampled_scaled = np.clip(resampled * 32767, -32768, 32767)
+                resampled_int16 = np.int16(resampled_scaled)
+                
+                # Process with Vosk
+                if self.recognizer.AcceptWaveform(resampled_int16.tobytes()):
+                    result = json.loads(self.recognizer.Result())
+                    text = result.get("text", "")
+                    if text:
+                        with self.audio_processor._audio_lock:
+                            self.audio_processor.audio_state["text"] = text
+                        logger.info(f"🗣️  Recognized: {text}")
+                else:
+                    # Partial results
+                    partial = json.loads(self.recognizer.PartialResult())
+                    partial_text = partial.get("partial", "")
+                    if partial_text:
+                        with self.audio_processor._audio_lock:
+                            self.audio_processor.audio_state["text"] = partial_text
+                            
         except Exception as e:
             logger.error(f"✗ Audio stream error: {e}", exc_info=True)
             with self.audio_processor._audio_lock:
@@ -146,6 +181,12 @@ class SpeechRecognizer:
             import traceback
             traceback.print_exc()
         finally:
+            if self._stream:
+                try:
+                    self._stream.stop()
+                    self._stream.close()
+                except Exception:
+                    pass
             self.is_running = False
     
     def stop(self):
