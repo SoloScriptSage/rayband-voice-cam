@@ -1,6 +1,6 @@
 """
 Camera handling and video processing for RayBand voice camera.
-Modified to use PyQt for Unicode (Ukrainian) text support.
+Modified to use PyQt for Unicode (Ukrainian) text support and emoji rendering.
 """
 
 import cv2
@@ -394,10 +394,13 @@ class CameraController:
                 hand_results = self.finger_detector.detect_fingers(frame)
                 self.finger_detector.draw_fingers(frame, hand_results)
 
-                # Adding new feature sign language
+                # Detect sign language (pass to PyQt, don't draw on frame)
                 sign, confidence = self.sign_detector.detect_sign(hand_results)
                 if sign and confidence > 0.7:
-                    self.sign_detector.draw_sign_info(frame, x=10, y=100)
+                    sign_description = self.sign_detector.get_sign_description(sign)
+                    viewer.set_sign_info(sign_description, confidence)
+                else:
+                    viewer.set_sign_info("", 0.0)
                 
             # Get current text
             current_text = self.audio_processor.get_last_text()

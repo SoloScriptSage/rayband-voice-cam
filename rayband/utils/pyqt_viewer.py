@@ -26,6 +26,8 @@ class CameraWidget(QLabel):
         self.fps = 0
         self.faces = []
         self.hand_results = None
+        self.sign_text = ""
+        self.sign_confidence = 0.0
         
         # Widget settings
         self.setMinimumSize(640, 480)
@@ -55,6 +57,12 @@ class CameraWidget(QLabel):
     def set_fps(self, fps: int):
         """Update FPS counter."""
         self.fps = fps
+        self.update()
+    
+    def set_sign_info(self, sign_text: str, confidence: float):
+        """Update sign language detection info."""
+        self.sign_text = sign_text
+        self.sign_confidence = confidence
         self.update()
     
     def paintEvent(self, event):
@@ -92,6 +100,10 @@ class CameraWidget(QLabel):
         if self.transcript_text:
             self._draw_transcript(painter, x, y, scaled_pixmap.width(), scaled_pixmap.height())
         
+        # Draw sign language info (with emoji support!)
+        if self.sign_text and self.sign_confidence > 0.7:
+            self._draw_sign_info(painter, x, y)
+        
         # Draw recording indicator
         if self.is_recording:
             self._draw_recording_indicator(painter, x, y)
@@ -101,8 +113,10 @@ class CameraWidget(QLabel):
     
     def _draw_transcript(self, painter, offset_x, offset_y, width, height):
         """Draw transcript text with semi-transparent background."""
-        # Setup font
-        font = QFont("Arial", 16)
+        # Setup font with emoji support
+        font = QFont("Segoe UI Emoji", 16)  # Windows emoji font
+        if font.family() == "":  # Fallback if not available
+            font = QFont("Arial", 16)
         font.setBold(True)
         painter.setFont(font)
         
@@ -145,6 +159,43 @@ class CameraWidget(QLabel):
         painter.setFont(QFont("Arial", 14, QFont.Bold))
         painter.drawText(offset_x + 45, offset_y + 33, "REC")
     
+    def _draw_sign_info(self, painter, offset_x, offset_y):
+        """Draw sign language detection info with emoji support."""
+        box_width = 400
+        box_height = 60
+        box_x = offset_x + 10
+        box_y = offset_y + 80
+        
+        # Draw semi-transparent background
+        painter.fillRect(
+            box_x, box_y, box_width, box_height,
+            QColor(0, 0, 0, 180)
+        )
+        
+        # Draw sign text with emoji support
+        painter.setPen(QColor(0, 255, 0))
+        font = QFont("Segoe UI Emoji", 14)
+        if font.family() == "":
+            font = QFont("Arial", 14)
+        font.setBold(True)
+        painter.setFont(font)
+        
+        text = f"Sign: {self.sign_text}"
+        painter.drawText(box_x + 10, box_y + 30, text)
+        
+        # Draw confidence bar
+        bar_x = box_x + 10
+        bar_y = box_y + 40
+        bar_width = 200
+        bar_height = 10
+        
+        # Background bar
+        painter.fillRect(bar_x, bar_y, bar_width, bar_height, QColor(50, 50, 50))
+        
+        # Confidence bar
+        conf_width = int(bar_width * self.sign_confidence)
+        painter.fillRect(bar_x, bar_y, conf_width, bar_height, QColor(0, 255, 0))
+    
     def _draw_status_bar(self, painter, offset_x, offset_y, width, height):
         """Draw status bar with FPS and language info."""
         bar_height = 40
@@ -158,7 +209,10 @@ class CameraWidget(QLabel):
         
         # Left side: FPS and language
         painter.setPen(QColor(200, 200, 200))
-        painter.setFont(QFont("Arial", 12))
+        font = QFont("Segoe UI Emoji", 12)  # Emoji support
+        if font.family() == "":
+            font = QFont("Arial", 12)
+        painter.setFont(font)
         status_text = f"FPS: {self.fps} | {self.current_language.upper()}"
         painter.drawText(offset_x + 10, bar_y + 25, status_text)
         
@@ -249,6 +303,10 @@ class PyQtCameraViewer(QMainWindow):
         """Update FPS counter."""
         self.camera_widget.set_fps(fps)
     
+    def set_sign_info(self, sign_text, confidence):
+        """Update sign language info."""
+        self.camera_widget.set_sign_info(sign_text, confidence)
+    
     def closeEvent(self, event):
         """Handle window close event."""
         logger.info("Closing PyQt viewer...")
@@ -272,6 +330,7 @@ def create_pyqt_viewer(camera_controller):
         viewer.set_recording(self.is_recording)
         viewer.set_language(self.current_language)
         viewer.set_fps(int(self._current_fps))
+        viewer.set_sign_info(sign_text, confidence)
         QApplication.processEvents()  # Process Qt events
     """
     app = QApplication.instance()
