@@ -215,11 +215,6 @@ class CameraWidget(QLabel):
         painter.setFont(font)
         status_text = f"FPS: {self.fps} | {self.current_language.upper()}"
         painter.drawText(offset_x + 10, bar_y + 25, status_text)
-        
-        # Right side: Quit instruction
-        quit_text = "Press Q to quit"
-        text_width = painter.fontMetrics().horizontalAdvance(quit_text)
-        painter.drawText(offset_x + width - text_width - 10, bar_y + 25, quit_text)
     
     def _wrap_text(self, text, max_width, fm):
         """Wrap text to fit within width."""
