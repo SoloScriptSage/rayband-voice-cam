@@ -1,5 +1,6 @@
 """
 Camera handling and video processing for RayBand voice camera.
+Modified to use PyQt for Unicode (Ukrainian) text support.
 """
 
 import cv2
@@ -11,10 +12,12 @@ import wave
 import shutil
 import subprocess
 from typing import Optional, Tuple
+from PyQt5.QtWidgets import QApplication
 
 from ..utils.config import config
 from ..utils.command_router import CommandRouter
 from ..utils.file_utils import FileManager
+from ..utils.pyqt_viewer import create_pyqt_viewer
 from .audio import AudioProcessor, SpeechRecognizer
 from .face_detection import FaceDetector
 from .finger_detection import FingerDetector
@@ -234,83 +237,17 @@ class CameraController:
                     cap.release()
         
         return None, "", -1
-    
-    def _wrap_text(self, text: str, max_width: int, max_lines: int = 3):
-        """Wrap text to fit within width."""
-        if not text:
-            return []
-        
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.8
-        thickness = 2
-        
-        text_ascii = text.encode('ascii', 'ignore').decode()
-        words = text_ascii.split()
-        lines = []
-        current = ""
-        
-        for word in words:
-            candidate = word if current == "" else current + " " + word
-            (w, h), _ = cv2.getTextSize(candidate, font, font_scale, thickness)
-            if w <= max_width:
-                current = candidate
-            else:
-                if current:
-                    lines.append(current)
-                current = word
-                if len(lines) >= max_lines:
-                    break
-        
-        if current and len(lines) < max_lines:
-            lines.append(current)
-        
-        # Add ellipsis if needed
-        if len(words) > len(" ".join(lines).split()) and lines:
-            lines[-1] = lines[-1] + "..."
-        
-        return lines
-    
-    def _draw_status_bar(self, frame):
-        """Draw status bar at bottom with info."""
-        bar_height = 30
-        
-        # Draw dark bar
-        overlay = frame.copy()
-        cv2.rectangle(
-            overlay, 
-            (0, frame.shape[0] - bar_height), 
-            (frame.shape[1], frame.shape[0]), 
-            (40, 40, 40), 
-            -1)
-        
-        cv2.addWeighted(overlay, 0.8, frame, 0.2, 0, frame)
-        
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        font_scale = 0.5
-        thickness = 1
-        y = frame.shape[0] - 10
-        
-        # Left side: FPS
-        fps = int(self._current_fps)
-        fps_text = f"FPS: {fps} | {self.current_language.upper()}"
-        cv2.putText(frame, fps_text, (10, y), font, font_scale, (200, 200, 200), thickness, cv2.LINE_AA)
-        
-        # Right side: Quit instruction
-        quit_text = "Press Q to quit"
-        (quit_w, _), _ = cv2.getTextSize(quit_text, font, font_scale, thickness)
-        cv2.putText(frame, quit_text, (frame.shape[1] - quit_w - 10, y), font, font_scale, (200, 200, 200), thickness, cv2.LINE_AA)
 
     def _handle_commands(self, current_text: str, frame):
         """Handle voice commands."""
         if not current_text or current_text == self.last_handled_text:
             return
         
-
         # Check for language switch FIRST
         new_language = self.command_router.detect_language_switch(current_text)
         if new_language and self.command_router.should_run("switch_language"):
             if self.config.switch_language(new_language):
-                self.speech_recognizer.reload_model(self.config.MODEL_PATH) # Reload model?
+                self.speech_recognizer.reload_model(self.config.MODEL_PATH)
                 self.current_language = new_language
                 self.command_router.mark_ran("switch_language")
                 self.last_handled_text = current_text
@@ -412,13 +349,11 @@ class CameraController:
             logger.error("❌ Cannot access camera")
             return
         
-        logger.info("✅ Camera started. Press 'q' to quit.")
+        logger.info("✅ Camera started. Press 'Q' to quit.")
         
-        # Create window
-        try:
-            cv2.namedWindow("RayBand Voice Camera", cv2.WINDOW_NORMAL)
-        except Exception:
-            pass
+        # Create PyQt viewer with Unicode support
+        app, viewer = create_pyqt_viewer(self)
+        viewer.show()
         
         # Main loop
         recovery_attempted = False
@@ -470,62 +405,22 @@ class CameraController:
             # Handle commands
             self._handle_commands(current_text, frame)
             
-            # Draw transcript overlay
-            margin_left = 20
-            margin_bottom = 20
-            available_width = frame.shape[1] - margin_left - 20
-            lines = self._wrap_text(current_text, available_width)
-            
-            if lines:
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                font_scale = 0.8
-                thickness = 2
-                (_, line_h), _ = cv2.getTextSize("Ag", font, font_scale, thickness)
-                total_height = len(lines) * (line_h + 6) + 14
-                
-                # Draw semi-transparent background
-                overlay = frame.copy()
-
-                status_bar_height = 30
-                
-                cv2.rectangle(
-                    overlay,
-                    (0, frame.shape[0] - total_height - status_bar_height),
-                    (frame.shape[1], frame.shape[0] - status_bar_height),
-                    (0, 0, 0),
-                    -1,
-                )
-                cv2.addWeighted(overlay, 0.6, frame, 0.4, 0, frame)
-                
-                # Draw text
-                base_y = frame.shape[0] - status_bar_height - margin_bottom - (len(lines) - 1) * (line_h + 6)
-                for i, line in enumerate(lines):
-                    y = base_y + i * (line_h + 6)
-                    cv2.putText(
-                        frame, line, (margin_left, y),
-                        font, font_scale, (0, 255, 0), thickness, cv2.LINE_AA
-                    )
-            
-            # Draw REC indicator
-            if self.is_recording:
-                cv2.circle(frame, (20, 30), 8, (0, 0, 255), -1)
-                cv2.putText(
-                    frame, "REC", (40, 36),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2, cv2.LINE_AA
-                )
-            
             # Write frame if recording
             if self.is_recording and self.video_writer:
                 self.video_writer.write(frame)
             
-
-            # Draw status bar
-            self._draw_status_bar(frame)
-
-            # Display
-            cv2.imshow("RayBand Voice Camera", frame)
+            # Update PyQt viewer with Unicode support!
+            viewer.set_frame(frame)
+            viewer.set_transcript(current_text)
+            viewer.set_recording(self.is_recording)
+            viewer.set_language(self.current_language)
+            viewer.set_fps(int(self._current_fps))
             
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            # Process Qt events
+            QApplication.processEvents()
+            
+            # Check if window was closed
+            if not viewer.isVisible():
                 break
         
         # Cleanup
@@ -539,6 +434,6 @@ class CameraController:
         if self.cap:
             self.cap.release()
         
-        cv2.destroyAllWindows()
+        # PyQt handles its own window cleanup
         self.speech_recognizer.stop()
         logger.info("✅ Camera stopped.")
