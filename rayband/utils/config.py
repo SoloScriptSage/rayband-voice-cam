@@ -3,6 +3,7 @@ Configuration management for RayBand voice camera.
 """
 
 import os
+from pathlib import Path
 from typing import Optional
 
 
@@ -10,16 +11,26 @@ class Config:
     """Configuration settings for the RayBand voice camera."""
     
     def __init__(self):
+
+        self._project_root = Path(__file__).parent.parent.parent.resolve()
+
         # Language models
+        models_dir = self._project_root / "models"
         self.MODELS = {
-            "english": "./models/vosk-model-en-us-0.22",
-            "ukrainian": "./models/vosk-model-uk-v3",
+            "english": str(models_dir / "vosk-model-en-us-0.22"),
+            "ukrainian": str(models_dir / "vosk-model-uk-v3"),
         }
 
         # Default language
         self.current_language = "english"
         self.MODEL_PATH = self.MODELS[self.current_language]
         
+        if not os.path.exists(self.MODEL_PATH):
+            print(f"⚠️  WARNING: Model not found at {self.MODEL_PATH}")
+            print(f"📁 Project root: {self._project_root}")
+            print(f"📁 Models dir: {models_dir}")
+            print(f"📁 Looking for: {os.listdir(models_dir) if models_dir.exists() else 'DIR NOT FOUND'}")
+            
         # Audio settings
         self.AUDIO_DEVICE_ID = 1
         self.MIC_SAMPLERATE = 44100
