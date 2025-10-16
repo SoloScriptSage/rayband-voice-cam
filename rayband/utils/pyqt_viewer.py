@@ -1,21 +1,23 @@
 """
-PyQt-based camera viewer with full Unicode support.
-Replace OpenCV window with PyQt for proper Ukrainian text display.
+PyQt-based camera viewer with modern, professional UI design.
+Features glassmorphism effects, smooth animations, and contemporary styling.
 """
 
 import sys
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import QApplication, QMainWindow, QLabel, QVBoxLayout, QWidget
-from PyQt5.QtCore import QTimer, Qt
-from PyQt5.QtGui import QImage, QPixmap, QPainter, QFont, QColor, QPen, QIcon
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QVBoxLayout, 
+                             QHBoxLayout, QWidget, QGraphicsDropShadowEffect)
+from PyQt5.QtCore import QTimer, Qt, QPropertyAnimation, QEasingCurve, pyqtProperty, QRect
+from PyQt5.QtGui import (QImage, QPixmap, QPainter, QFont, QColor, QPen, 
+                        QLinearGradient, QRadialGradient, QPainterPath, QBrush)
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-class CameraWidget(QLabel):
-    """Custom widget for displaying camera feed with overlays."""
+class ModernCameraWidget(QLabel):
+    """Modern camera widget with glassmorphism and smooth animations."""
     
     def __init__(self):
         super().__init__()
@@ -24,15 +26,43 @@ class CameraWidget(QLabel):
         self.is_recording = False
         self.current_language = "english"
         self.fps = 0
-        self.faces = []
-        self.hand_results = None
         self.sign_text = ""
         self.sign_confidence = 0.0
         
+        # Animation properties
+        self._recording_opacity = 0
+        self._rec_pulse_direction = 1
+        self._sign_box_opacity = 0
+        
         # Widget settings
-        self.setMinimumSize(640, 480)
+        self.setMinimumSize(800, 600)
         self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("background-color: black;")
+        self.setStyleSheet("background-color: #0a0e27;")
+        
+        # Setup animation timer
+        self.anim_timer = QTimer()
+        self.anim_timer.timeout.connect(self._update_animations)
+        self.anim_timer.start(50)  # 20 FPS for animations
+    
+    def _update_animations(self):
+        """Update animation states."""
+        if self.is_recording:
+            # Pulse effect for recording indicator
+            self._recording_opacity += 0.1 * self._rec_pulse_direction
+            if self._recording_opacity >= 1.0:
+                self._recording_opacity = 1.0
+                self._rec_pulse_direction = -1
+            elif self._recording_opacity <= 0.3:
+                self._recording_opacity = 0.3
+                self._rec_pulse_direction = 1
+        
+        # Fade in/out sign language box
+        if self.sign_text and self.sign_confidence > 0.7:
+            self._sign_box_opacity = min(1.0, self._sign_box_opacity + 0.1)
+        else:
+            self._sign_box_opacity = max(0.0, self._sign_box_opacity - 0.1)
+        
+        self.update()
     
     def set_frame(self, frame: np.ndarray):
         """Update the displayed frame."""
@@ -46,6 +76,8 @@ class CameraWidget(QLabel):
     
     def set_recording(self, recording: bool):
         """Update recording status."""
+        if recording and not self.is_recording:
+            self._recording_opacity = 0.3
         self.is_recording = recording
         self.update()
     
@@ -66,155 +98,261 @@ class CameraWidget(QLabel):
         self.update()
     
     def paintEvent(self, event):
-        """Custom paint event for drawing frame and overlays."""
+        """Custom paint event with modern design."""
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        
+        # Draw gradient background
+        gradient = QLinearGradient(0, 0, self.width(), self.height())
+        gradient.setColorAt(0, QColor(10, 14, 39))
+        gradient.setColorAt(1, QColor(20, 25, 55))
+        painter.fillRect(self.rect(), gradient)
         
         if self.frame is None:
-            painter.fillRect(self.rect(), QColor(0, 0, 0))
-            painter.setPen(QColor(255, 255, 255))
-            painter.setFont(QFont("Arial", 16))
-            painter.drawText(self.rect(), Qt.AlignCenter, "No camera feed")
+            self._draw_no_camera(painter)
             return
         
-        # Convert OpenCV frame to QPixmap
+        # Convert and display frame with rounded corners
         height, width, channel = self.frame.shape
         bytes_per_line = 3 * width
         rgb_frame = cv2.cvtColor(self.frame, cv2.COLOR_BGR2RGB)
         q_img = QImage(rgb_frame.data, width, height, bytes_per_line, QImage.Format_RGB888)
         
-        # Scale to fit widget while maintaining aspect ratio
+        # Scale to fit with padding
+        padding = 20
+        available_width = self.width() - (padding * 2)
+        available_height = self.height() - (padding * 2)
+        
         scaled_pixmap = QPixmap.fromImage(q_img).scaled(
-            self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            available_width, available_height,
+            Qt.KeepAspectRatio, Qt.SmoothTransformation
         )
         
-        # Center the pixmap
+        # Center the frame
         x = (self.width() - scaled_pixmap.width()) // 2
         y = (self.height() - scaled_pixmap.height()) // 2
-        painter.drawPixmap(x, y, scaled_pixmap)
         
-        # Calculate scaling factor for overlay positioning
-        scale_x = scaled_pixmap.width() / width
-        scale_y = scaled_pixmap.height() / height
+        # Draw frame with rounded corners and glow effect
+        self._draw_frame_with_effects(painter, scaled_pixmap, x, y)
         
-        # Draw transcript overlay (with Ukrainian support!)
-        if self.transcript_text:
-            self._draw_transcript(painter, x, y, scaled_pixmap.width(), scaled_pixmap.height())
-        
-        # Draw sign language info (with emoji support!)
-        if self.sign_text and self.sign_confidence > 0.7:
-            self._draw_sign_info(painter, x, y)
-        
-        # Draw recording indicator
-        if self.is_recording:
-            self._draw_recording_indicator(painter, x, y)
-        
-        # Draw status bar
+        # Draw overlays
+        self._draw_recording_indicator(painter, x, y)
+        self._draw_sign_language_box(painter, x, y, scaled_pixmap.width())
+        self._draw_transcript_box(painter, x, y, scaled_pixmap.width(), scaled_pixmap.height())
         self._draw_status_bar(painter, x, y, scaled_pixmap.width(), scaled_pixmap.height())
     
-    def _draw_transcript(self, painter, offset_x, offset_y, width, height):
-        """Draw transcript text with semi-transparent background."""
-        # Setup font with emoji support
-        font = QFont("Segoe UI Emoji", 16)  # Windows emoji font
-        if font.family() == "":  # Fallback if not available
-            font = QFont("Arial", 16)
-        font.setBold(True)
+    def _draw_no_camera(self, painter):
+        """Draw 'no camera' screen."""
+        painter.setPen(QColor(100, 120, 180))
+        font = QFont("Segoe UI", 20, QFont.Light)
         painter.setFont(font)
+        painter.drawText(self.rect(), Qt.AlignCenter, "📹 Initializing Camera...")
+    
+    def _draw_frame_with_effects(self, painter, pixmap, x, y):
+        """Draw camera frame with rounded corners and glow."""
+        # Create rounded rectangle path
+        path = QPainterPath()
+        radius = 12
+        path.addRoundedRect(x, y, pixmap.width(), pixmap.height(), radius, radius)
         
-        # Calculate text metrics
-        fm = painter.fontMetrics()
-        lines = self._wrap_text(self.transcript_text, width - 40, fm)
-        
-        if not lines:
-            return
-        
-        # Calculate background dimensions
-        line_height = fm.height()
-        total_height = len(lines) * line_height + 20
-        status_bar_height = 40
-        
-        # Draw semi-transparent background
-        bg_rect = painter.viewport()
-        bg_y = offset_y + height - total_height - status_bar_height - 10
-        painter.fillRect(
-            offset_x, bg_y, width, total_height,
-            QColor(0, 0, 0, 180)  # Semi-transparent black
+        # Draw subtle outer glow
+        painter.setPen(Qt.NoPen)
+        glow_gradient = QRadialGradient(
+            x + pixmap.width() / 2, 
+            y + pixmap.height() / 2,
+            max(pixmap.width(), pixmap.height()) / 2 + 10
         )
+        glow_gradient.setColorAt(0.9, QColor(100, 150, 255, 30))
+        glow_gradient.setColorAt(1.0, QColor(100, 150, 255, 0))
+        painter.setBrush(glow_gradient)
+        painter.drawPath(path)
         
-        # Draw text lines
-        painter.setPen(QColor(0, 255, 0))  # Green text
-        y = bg_y + 20
-        for line in lines:
-            painter.drawText(offset_x + 20, y, line)
-            y += line_height
+        # Clip and draw pixmap
+        painter.setClipPath(path)
+        painter.drawPixmap(x, y, pixmap)
+        painter.setClipping(False)
+        
+        # Draw subtle border
+        painter.setPen(QPen(QColor(100, 120, 180, 60), 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
     
     def _draw_recording_indicator(self, painter, offset_x, offset_y):
-        """Draw REC indicator."""
-        # Red circle
-        painter.setBrush(QColor(255, 0, 0))
-        painter.setPen(Qt.NoPen)
-        painter.drawEllipse(offset_x + 20, offset_y + 20, 16, 16)
+        """Draw modern recording indicator with pulse effect."""
+        if not self.is_recording:
+            return
         
-        # REC text
-        painter.setPen(QColor(255, 0, 0))
-        painter.setFont(QFont("Arial", 14, QFont.Bold))
-        painter.drawText(offset_x + 45, offset_y + 33, "REC")
+        # Pulsing circle
+        painter.setPen(Qt.NoPen)
+        
+        # Outer glow
+        glow_color = QColor(255, 50, 80, int(100 * self._recording_opacity))
+        painter.setBrush(glow_color)
+        painter.drawEllipse(offset_x + 15, offset_y + 15, 28, 28)
+        
+        # Inner circle
+        inner_color = QColor(255, 50, 80, int(255 * self._recording_opacity))
+        painter.setBrush(inner_color)
+        painter.drawEllipse(offset_x + 20, offset_y + 20, 18, 18)
+        
+        # REC text with glassmorphism background
+        text_x = offset_x + 50
+        text_y = offset_y + 15
+        
+        # Glass background
+        self._draw_glass_rect(painter, text_x, text_y, 60, 28, QColor(255, 50, 80, 150))
+        
+        # Text
+        painter.setPen(QColor(255, 255, 255))
+        painter.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        painter.drawText(text_x + 5, text_y + 20, "REC")
     
-    def _draw_sign_info(self, painter, offset_x, offset_y):
-        """Draw sign language detection info with emoji support."""
-        box_width = 400
-        box_height = 60
-        box_x = offset_x + 10
+    def _draw_sign_language_box(self, painter, offset_x, offset_y, width):
+        """Draw modern sign language detection box."""
+        if self._sign_box_opacity <= 0:
+            return
+        
+        box_width = min(500, width - 40)
+        box_height = 100
+        box_x = offset_x + (width - box_width) // 2
         box_y = offset_y + 80
         
-        # Draw semi-transparent background
-        painter.fillRect(
-            box_x, box_y, box_width, box_height,
-            QColor(0, 0, 0, 180)
-        )
+        painter.setOpacity(self._sign_box_opacity)
         
-        # Draw sign text with emoji support
-        painter.setPen(QColor(0, 255, 0))
-        font = QFont("Segoe UI Emoji", 14)
-        if font.family() == "":
-            font = QFont("Arial", 14)
-        font.setBold(True)
+        # Glassmorphism background
+        self._draw_glass_rect(painter, box_x, box_y, box_width, box_height, 
+                             QColor(30, 40, 80, 200))
+        
+        # Icon and title
+        painter.setPen(QColor(100, 200, 255))
+        painter.setFont(QFont("Segoe UI", 12, QFont.Bold))
+        painter.drawText(box_x + 20, box_y + 30, "🤟 SIGN DETECTED")
+        
+        # Sign description
+        painter.setPen(QColor(255, 255, 255))
+        font = QFont("Segoe UI Emoji", 16)
+        painter.setFont(font)
+        text = self.sign_text
+        painter.drawText(box_x + 20, box_y + 60, text)
+        
+        # Modern confidence bar
+        bar_x = box_x + 20
+        bar_y = box_y + 75
+        bar_width = box_width - 40
+        bar_height = 8
+        
+        # Background track
+        track_path = QPainterPath()
+        track_path.addRoundedRect(bar_x, bar_y, bar_width, bar_height, 4, 4)
+        painter.fillPath(track_path, QColor(50, 60, 100, 150))
+        
+        # Confidence fill with gradient
+        conf_width = int(bar_width * self.sign_confidence)
+        if conf_width > 0:
+            fill_path = QPainterPath()
+            fill_path.addRoundedRect(bar_x, bar_y, conf_width, bar_height, 4, 4)
+            
+            gradient = QLinearGradient(bar_x, bar_y, bar_x + conf_width, bar_y)
+            gradient.setColorAt(0, QColor(100, 200, 255))
+            gradient.setColorAt(1, QColor(150, 100, 255))
+            painter.fillPath(fill_path, gradient)
+        
+        painter.setOpacity(1.0)
+    
+    def _draw_transcript_box(self, painter, offset_x, offset_y, width, height):
+        """Draw modern transcript box."""
+        if not self.transcript_text:
+            return
+        
+        box_height = 120
+        box_y = offset_y + height - box_height - 60
+        padding = 20
+        
+        # Glassmorphism background
+        self._draw_glass_rect(painter, offset_x, box_y, width, box_height,
+                             QColor(20, 30, 60, 220))
+        
+        # Icon and label
+        painter.setPen(QColor(100, 200, 255))
+        painter.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        painter.drawText(offset_x + padding, box_y + 25, "🎤 VOICE TRANSCRIPT")
+        
+        # Transcript text
+        painter.setPen(QColor(255, 255, 255))
+        font = QFont("Segoe UI", 14)
         painter.setFont(font)
         
-        text = f"Sign: {self.sign_text}"
-        painter.drawText(box_x + 10, box_y + 30, text)
+        fm = painter.fontMetrics()
+        text_width = width - (padding * 2)
+        lines = self._wrap_text(self.transcript_text, text_width, fm)
         
-        # Draw confidence bar
-        bar_x = box_x + 10
-        bar_y = box_y + 40
-        bar_width = 200
-        bar_height = 10
-        
-        # Background bar
-        painter.fillRect(bar_x, bar_y, bar_width, bar_height, QColor(50, 50, 50))
-        
-        # Confidence bar
-        conf_width = int(bar_width * self.sign_confidence)
-        painter.fillRect(bar_x, bar_y, conf_width, bar_height, QColor(0, 255, 0))
+        y = box_y + 55
+        for line in lines[:3]:  # Max 3 lines
+            painter.drawText(offset_x + padding, y, line)
+            y += fm.height() + 5
     
     def _draw_status_bar(self, painter, offset_x, offset_y, width, height):
-        """Draw status bar with FPS and language info."""
-        bar_height = 40
+        """Draw modern status bar."""
+        bar_height = 50
         bar_y = offset_y + height - bar_height
         
-        # Draw semi-transparent background
-        painter.fillRect(
-            offset_x, bar_y, width, bar_height,
-            QColor(40, 40, 40, 200)
-        )
+        # Glassmorphism background
+        self._draw_glass_rect(painter, offset_x, bar_y, width, bar_height,
+                             QColor(15, 20, 40, 230))
         
-        # Left side: FPS and language
-        painter.setPen(QColor(200, 200, 200))
-        font = QFont("Segoe UI Emoji", 12)  # Emoji support
-        if font.family() == "":
-            font = QFont("Arial", 12)
-        painter.setFont(font)
-        status_text = f"FPS: {self.fps} | {self.current_language.upper()}"
-        painter.drawText(offset_x + 10, bar_y + 25, status_text)
+        # Left side: FPS with icon
+        painter.setPen(QColor(100, 200, 255))
+        painter.setFont(QFont("Segoe UI", 11, QFont.Bold))
+        fps_text = f"⚡ {self.fps} FPS"
+        painter.drawText(offset_x + 20, bar_y + 32, fps_text)
+        
+        # Center: App title
+        painter.setPen(QColor(255, 255, 255, 180))
+        painter.setFont(QFont("Segoe UI", 10))
+        title = "RayBand Voice Camera"
+        title_width = painter.fontMetrics().horizontalAdvance(title)
+        painter.drawText(offset_x + (width - title_width) // 2, bar_y + 32, title)
+        
+        # Right side: Language with gradient
+        lang_text = f"🌐 {self.current_language.upper()}"
+        text_width = painter.fontMetrics().horizontalAdvance(lang_text)
+        
+        # Language badge background
+        badge_x = offset_x + width - text_width - 50
+        badge_y = bar_y + 12
+        badge_path = QPainterPath()
+        badge_path.addRoundedRect(badge_x, badge_y, text_width + 30, 26, 13, 13)
+        
+        gradient = QLinearGradient(badge_x, badge_y, badge_x + text_width + 30, badge_y)
+        gradient.setColorAt(0, QColor(100, 150, 255, 100))
+        gradient.setColorAt(1, QColor(150, 100, 255, 100))
+        painter.fillPath(badge_path, gradient)
+        
+        painter.setPen(QColor(255, 255, 255))
+        painter.setFont(QFont("Segoe UI", 10, QFont.Bold))
+        painter.drawText(badge_x + 15, bar_y + 32, lang_text)
+    
+    def _draw_glass_rect(self, painter, x, y, width, height, color):
+        """Draw glassmorphism rectangle with blur effect simulation."""
+        # Create rounded rectangle
+        path = QPainterPath()
+        path.addRoundedRect(x, y, width, height, 10, 10)
+        
+        # Fill with semi-transparent color
+        painter.fillPath(path, color)
+        
+        # Add subtle gradient overlay for glass effect
+        gradient = QLinearGradient(x, y, x, y + height)
+        gradient.setColorAt(0, QColor(255, 255, 255, 30))
+        gradient.setColorAt(0.5, QColor(255, 255, 255, 5))
+        gradient.setColorAt(1, QColor(0, 0, 0, 20))
+        painter.fillPath(path, gradient)
+        
+        # Border
+        painter.setPen(QPen(QColor(255, 255, 255, 40), 1.5))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
     
     def _wrap_text(self, text, max_width, fm):
         """Wrap text to fit within width."""
@@ -233,15 +371,9 @@ class CameraWidget(QLabel):
                 if current_line:
                     lines.append(current_line)
                 current_line = word
-                if len(lines) >= 3:  # Max 3 lines
-                    break
         
-        if current_line and len(lines) < 3:
+        if current_line:
             lines.append(current_line)
-        
-        # Add ellipsis if needed
-        if len(words) > len(" ".join(lines).split()) and lines:
-            lines[-1] = lines[-1] + "..."
         
         return lines
     
@@ -251,8 +383,8 @@ class CameraWidget(QLabel):
             QApplication.quit()
 
 
-class PyQtCameraViewer(QMainWindow):
-    """Main window for PyQt camera viewer."""
+class ModernCameraViewer(QMainWindow):
+    """Modern main window with professional styling."""
     
     def __init__(self, camera_controller):
         super().__init__()
@@ -262,20 +394,29 @@ class PyQtCameraViewer(QMainWindow):
         self.setWindowTitle("RayBand Voice Camera")
         self.setGeometry(100, 100, 1280, 720)
         
+        # Modern dark stylesheet
+        self.setStyleSheet("""
+            QMainWindow {
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:1,
+                    stop:0 #0a0e27, stop:1 #14182e
+                );
+            }
+        """)
+        
         # Create camera widget
-        self.camera_widget = CameraWidget()
+        self.camera_widget = ModernCameraWidget()
         self.setCentralWidget(self.camera_widget)
         
         # Setup update timer
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_frame)
-        self.timer.start(30)  # ~30 FPS update rate
+        self.timer.start(30)
         
-        logger.info("✓ PyQt camera viewer initialized")
+        logger.info("✓ Modern PyQt camera viewer initialized")
     
     def update_frame(self):
-        """Update camera frame and overlays."""
-        # This will be called by the camera controller
+        """Update camera frame."""
         pass
     
     def set_frame(self, frame):
@@ -304,33 +445,19 @@ class PyQtCameraViewer(QMainWindow):
     
     def closeEvent(self, event):
         """Handle window close event."""
-        logger.info("Closing PyQt viewer...")
+        logger.info("Closing modern viewer...")
         event.accept()
 
 
 def create_pyqt_viewer(camera_controller):
     """
-    Create and return PyQt viewer instance.
+    Create modern PyQt viewer instance.
     
-    Usage in camera_controller:
-        from rayband.utils.pyqt_viewer import create_pyqt_viewer
-        
-        # In start() method, replace cv2.imshow with:
-        app, viewer = create_pyqt_viewer(self)
-        viewer.show()
-        
-        # In main loop:
-        viewer.set_frame(frame)
-        viewer.set_transcript(current_text)
-        viewer.set_recording(self.is_recording)
-        viewer.set_language(self.current_language)
-        viewer.set_fps(int(self._current_fps))
-        viewer.set_sign_info(sign_text, confidence)
-        QApplication.processEvents()  # Process Qt events
+    Replace the existing create_pyqt_viewer function in pyqt_viewer.py
     """
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
     
-    viewer = PyQtCameraViewer(camera_controller)
+    viewer = ModernCameraViewer(camera_controller)
     return app, viewer
